@@ -29,13 +29,13 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define MD2_IDENT       MakeLittleLong('I','D','P','2')
 #define MD2_VERSION     8
 
-#define MD2_MAX_TRIANGLES   65536
-#define MD2_MAX_VERTS       65536
-#define MD2_MAX_FRAMES      65536
-#define MD2_MAX_SKINS       65536
-#define MD2_MAX_SKINNAME    65536
-#define MD2_MAX_SKINWIDTH   65536
-#define MD2_MAX_SKINHEIGHT  65536
+#define MD2_MAX_TRIANGLES   9999
+#define MD2_MAX_VERTS       9999
+#define MD2_MAX_FRAMES      9999
+#define MD2_MAX_SKINS       99
+#define MD2_MAX_SKINNAME    99
+#define MD2_MAX_SKINWIDTH   999
+#define MD2_MAX_SKINHEIGHT  999
 
 typedef struct {
     int16_t    s;
