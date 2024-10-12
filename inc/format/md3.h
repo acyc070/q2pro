@@ -31,13 +31,13 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 // limits
 #define MD3_MAX_LODS        3
-#define MD3_MAX_TRIANGLES   8192    // per mesh
-#define MD3_MAX_VERTS       4096    // per mesh
-#define MD3_MAX_SKINS       256     // per mesh
-#define MD3_MAX_FRAMES      1024    // per model
-#define MD3_MAX_MESHES      32      // per model
-#define MD3_MAX_TAGS        16      // per frame
-#define MD3_MAX_PATH        64
+#define MD3_MAX_TRIANGLES   65536    // per mesh
+#define MD3_MAX_VERTS       65536   // per mesh
+#define MD3_MAX_SKINS       65536     // per mesh
+#define MD3_MAX_FRAMES      65536    // per model
+#define MD3_MAX_MESHES      65536      // per model
+#define MD3_MAX_TAGS        65536      // per frame
+#define MD3_MAX_PATH        65536
 
 // vertex scales
 #define    MD3_XYZ_SCALE        (1.0f/64.0f)
