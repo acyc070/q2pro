@@ -39,10 +39,10 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 // key / value pair sizes
 
-#define     MAX_KEY         128
-#define     MAX_VALUE       4096
+#define     MAX_KEY         32
+#define     MAX_VALUE       1024
 
-#define     MAX_TEXNAME     128
+#define     MAX_TEXNAME     32
 
 //=============================================================================
 
@@ -58,7 +58,7 @@ typedef struct {
     lump_t      lumps[HEADER_LUMPS];
 } dheader_t;
 
-#define    MAX_LIGHTMAPS    16
+#define    MAX_LIGHTMAPS    4
 
 #define ANGLE_UP    -1
 #define ANGLE_DOWN  -2
