@@ -713,7 +713,7 @@ void Cmd_Wave_f(edict_t *ent)
     }
 }
 
-static bool FloodProtect(edict_t *ent)
+/*static bool FloodProtect(edict_t *ent)
 {
     int i, msgs = flood_msgs->value;
     gclient_t *cl = ent->client;
@@ -742,7 +742,7 @@ static bool FloodProtect(edict_t *ent)
     cl->flood_when[cl->flood_whenhead] = level.time;
     return false;
 }
-
+*/
 /*
 ==================
 Cmd_Say_f
