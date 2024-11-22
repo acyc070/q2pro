@@ -198,6 +198,7 @@ typedef struct {
 
     server_frame_t  frames[UPDATE_BACKUP];
     unsigned        frameflags;
+    int             suppress_count;
 
     server_frame_t  frame;                // received from server
     server_frame_t  oldframe;
@@ -312,6 +313,8 @@ typedef struct {
 
     unsigned hit_marker_time;
     int hit_marker_count;
+
+    player_fog_t custom_fog;
 } client_state_t;
 
 extern client_state_t   cl;
@@ -495,6 +498,7 @@ typedef struct {
         player_packed_t     ps;
         entity_packed_t     entities[MAX_EDICTS];
         msgEsFlags_t        esFlags;    // for writing
+        msgPsFlags_t        psFlags;
 
         sizebuf_t       message;
     } gtv;
@@ -693,7 +697,7 @@ void CL_SendCmd(void);
     (MSG_ES_LONGSOLID | MSG_ES_UMASK | MSG_ES_BEAMORIGIN | MSG_ES_SHORTANGLES | MSG_ES_EXTENSIONS)
 
 #define CL_ES_EXTENDED_MASK_2 (CL_ES_EXTENDED_MASK | MSG_ES_EXTENSIONS_2)
-#define CL_PS_EXTENDED_MASK_2 (MSG_PS_EXTENSIONS | MSG_PS_EXTENSIONS_2)
+#define CL_PS_EXTENDED_MASK_2 (MSG_PS_EXTENSIONS | MSG_PS_EXTENSIONS_2 | MSG_PS_MOREBITS)
 
 typedef struct {
     int type;
@@ -741,6 +745,9 @@ bool CL_SeekDemoMessage(void);
                          EF_FLIES | EF_BFG | EF_TRAP | EF_FLAG1 | EF_FLAG2 | EF_TAGTRAIL | \
                          EF_TRACKERTRAIL | EF_TRACKER | EF_GREENGIB | EF_IONRIPPER | \
                          EF_BLUEHYPERBLASTER | EF_PLASMA)
+
+#define IS_TRACKER(effects) \
+    (((effects) & (EF_TRACKERTRAIL | EF_TRACKER)) == EF_TRACKERTRAIL)
 
 void CL_DeltaFrame(void);
 void CL_AddEntities(void);
@@ -843,6 +850,7 @@ typedef struct cparticle_s {
     vec3_t  vel;
     vec3_t  accel;
     int     color;      // -1 => use rgba
+    float   scale;
     float   alpha;
     float   alphavel;
     color_t rgba;
@@ -1000,6 +1008,7 @@ void    SCR_ModeChanged(void);
 void    SCR_LagSample(void);
 void    SCR_LagClear(void);
 void    SCR_SetCrosshairColor(void);
+void    SCR_AddNetgraph(void);
 
 float   SCR_FadeAlpha(unsigned startTime, unsigned visTime, unsigned fadeTime);
 int     SCR_DrawStringEx(int x, int y, int flags, size_t maxlen, const char *s, qhandle_t font);

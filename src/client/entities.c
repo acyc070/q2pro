@@ -812,6 +812,9 @@ static void CL_AddPacketEntities(void)
 
         ent.scale = s1->scale;
 
+        if (IS_TRACKER(effects))
+            ent.flags |= RF_TRACKER;
+
         // add to refresh list
         V_AddEntity(&ent);
 
@@ -862,12 +865,17 @@ static void CL_AddPacketEntities(void)
             ent.alpha = s1->alpha;
         }
 
+        if (IS_TRACKER(effects))
+            ent.flags |= RF_TRACKER;
+
         // duplicate for linked models
         if (s1->modelindex2) {
             if (s1->modelindex2 == MODELINDEX_PLAYER) {
                 // custom weapon
                 ci = &cl.clientinfo[s1->skinnum & 0xff];
                 i = (s1->skinnum >> 8); // 0 is default weapon model
+                if (cl.csr.extended)
+                    i &= 0xff;
                 if (i < 0 || i > cl.numWeaponModels - 1)
                     i = 0;
                 ent.model = ci->weaponmodel[i];
@@ -898,6 +906,9 @@ static void CL_AddPacketEntities(void)
             ent.flags = RF_TRANSLUCENT;
             ent.alpha = s1->alpha;
         }
+
+        if (IS_TRACKER(effects))
+            ent.flags |= RF_TRACKER;
 
         if (s1->modelindex3) {
             ent.model = cl.model_draw[s1->modelindex3];
@@ -978,11 +989,14 @@ static void CL_AddPacketEntities(void)
         } else if (effects & EF_FLIES) {
             CL_FlyEffect(cent, ent.origin);
         } else if (effects & EF_BFG) {
+            static const uint16_t bfg_lightramp[6] = {300, 400, 600, 300, 150, 75};
             if (effects & EF_ANIM_ALLFAST) {
                 CL_BfgParticles(&ent);
                 i = 200;
+            } else if (cl.csr.extended) {
+                i = bfg_lightramp[Q_clip(ent.oldframe, 0, 5)] * ent.backlerp +
+                    bfg_lightramp[Q_clip(ent.frame,    0, 5)] * (1.0f - ent.backlerp);
             } else {
-                static const uint16_t bfg_lightramp[6] = {300, 400, 600, 300, 150, 75};
                 i = bfg_lightramp[Q_clip(s1->frame, 0, 5)];
             }
             V_AddLight(ent.origin, i, 0, 1, 0);
@@ -1072,8 +1086,13 @@ static int shell_effect_hack(void)
         flags |= RF_SHELL_DOUBLE;
     if (ent->current.effects & EF_HALF_DAMAGE)
         flags |= RF_SHELL_HALF_DAM;
-    if (ent->current.morefx & EFX_DUALFIRE)
-        flags |= RF_SHELL_LITE_GREEN;
+
+    if (cl.csr.extended) {
+        if (ent->current.morefx & EFX_DUALFIRE)
+            flags |= RF_SHELL_LITE_GREEN;
+        if (ent->current.effects & EF_COLOR_SHELL)
+            flags |= ent->current.renderfx & RF_SHELL_MASK;
+    }
 
     return flags;
 }
@@ -1315,6 +1334,14 @@ static inline float lerp_client_fov(float ofov, float nfov, float lerp)
     return ofov + lerp * (nfov - ofov);
 }
 
+static inline void lerp_values(const void *from, const void *to, float lerp, void *out, int count)
+{
+    float backlerp = 1.0f - lerp;
+
+    for (int i = 0; i < count; i++)
+        ((float *)out)[i] = ((const float *)from)[i] * backlerp + ((const float *)to)[i] * lerp;
+}
+
 /*
 ===============
 CL_CalcViewValues
@@ -1349,9 +1376,6 @@ void CL_CalcViewValues(void)
         VectorMA(cl.predicted_origin, backlerp, cl.prediction_error, cl.refdef.vieworg);
 
         // smooth out stair climbing
-        if (cl.predicted_step < 127 * 0.125f) {
-            delta <<= 1; // small steps
-        }
         if (delta < 100) {
             cl.refdef.vieworg[2] -= cl.predicted_step * (100 - delta) * 0.01f;
         }
@@ -1388,6 +1412,19 @@ void CL_CalcViewValues(void)
     // don't interpolate blend color
     Vector4Copy(ps->blend, cl.refdef.screen_blend);
     Vector4Copy(ps->damage_blend, cl.refdef.damage_blend);
+
+    // interpolate fog
+    if (cl.psFlags & MSG_PS_MOREBITS) {
+        lerp_values(&ops->fog, &ps->fog, lerp,
+                    &cl.refdef.fog, sizeof(cl.refdef.fog) / sizeof(float));
+        // no lerping if moved too far
+        if (fabsf(ps->heightfog.start.dist - ops->heightfog.start.dist) > 512 ||
+            fabsf(ps->heightfog.end  .dist - ops->heightfog.end  .dist) > 512)
+            cl.refdef.heightfog = ps->heightfog;
+        else
+            lerp_values(&ops->heightfog, &ps->heightfog, lerp,
+                        &cl.refdef.heightfog, sizeof(cl.refdef.heightfog) / sizeof(float));
+    }
 
 #if USE_FPS
     ps = &cl.keyframe.ps;

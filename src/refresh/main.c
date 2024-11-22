@@ -61,6 +61,8 @@ cvar_t *gl_md5_distance;
 #endif
 cvar_t *gl_damageblend_frac;
 cvar_t *gl_waterwarp;
+cvar_t *gl_fog;
+cvar_t *gl_bloom;
 cvar_t *gl_swapinterval;
 
 // development variables
@@ -71,6 +73,7 @@ cvar_t *gl_drawsky;
 cvar_t *gl_showtris;
 cvar_t *gl_showorigins;
 cvar_t *gl_showtearing;
+cvar_t *gl_showbloom;
 #if USE_DEBUG
 cvar_t *gl_showstats;
 cvar_t *gl_showscrap;
@@ -313,14 +316,12 @@ void GL_RotationMatrix(GLfloat *matrix)
 
 void GL_RotateForEntity(bool skies)
 {
-    GLfloat matrix[16];
-
-    GL_RotationMatrix(matrix);
+    GL_RotationMatrix(gls.u_block.m_model);
     if (skies) {
-        GL_MultMatrix(gls.u_block.msky[0], glr.skymatrix[0], matrix);
-        GL_MultMatrix(gls.u_block.msky[1], glr.skymatrix[1], matrix);
+        GL_MultMatrix(gls.u_block.m_sky[0], glr.skymatrix[0], gls.u_block.m_model);
+        GL_MultMatrix(gls.u_block.m_sky[1], glr.skymatrix[1], gls.u_block.m_model);
     }
-    GL_MultMatrix(glr.entmatrix, glr.viewmatrix, matrix);
+    GL_MultMatrix(glr.entmatrix, glr.viewmatrix, gls.u_block.m_model);
     GL_ForceMatrix(glr.entmatrix);
 }
 
@@ -330,7 +331,7 @@ static void GL_DrawSpriteModel(const model_t *model)
     const mspriteframe_t *frame = &model->spriteframes[e->frame % model->numframes];
     const image_t *image = frame->image;
     const float alpha = (e->flags & RF_TRANSLUCENT) ? e->alpha : 1.0f;
-    glStateBits_t bits = GLS_DEPTHMASK_FALSE;
+    glStateBits_t bits = GLS_DEPTHMASK_FALSE | glr.fog_bits;
     vec3_t up, down, left, right;
 
     if (alpha == 1.0f) {
@@ -426,6 +427,8 @@ static void GL_OccludeFlares(void)
     const entity_t *e;
     glquery_t *q;
     int i, j;
+    vec3_t dir, org;
+    float scale, dist;
     bool set = false;
 
     if (!glr.num_flares)
@@ -449,10 +452,16 @@ static void GL_OccludeFlares(void)
         }
 
         if (q) {
-            if (q->pending)
-                continue;
-            if (com_eventTime - q->timestamp <= 33)
-                continue;
+            // reset visibility if entity disappeared
+            if (com_eventTime - q->timestamp >= 2500) {
+                q->pending = q->visible = false;
+                q->frac = 0;
+            } else {
+                if (q->pending)
+                    continue;
+                if (com_eventTime - q->timestamp <= 33)
+                    continue;
+            }
         } else {
             glquery_t new = { 0 };
             uint32_t map_size = HashMap_Size(gl_static.queries);
@@ -473,14 +482,19 @@ static void GL_OccludeFlares(void)
             set = true;
         }
 
+        VectorSubtract(e->origin, glr.fd.vieworg, dir);
+        dist = DotProduct(dir, glr.viewaxis[0]);
+
+        scale = 2.5f;
+        if (dist > 20)
+            scale += dist * 0.004f;
+
         if (bsp && BSP_PointLeaf(bsp->nodes, e->origin)->contents == CONTENTS_SOLID) {
-            vec3_t dir, org;
-            VectorSubtract(glr.fd.vieworg, e->origin, dir);
             VectorNormalize(dir);
-            VectorMA(e->origin, 5.0f, dir, org);
-            make_flare_quad(org, 2.5f);
+            VectorMA(e->origin, -5.0f, dir, org);
+            make_flare_quad(org, scale);
         } else
-            make_flare_quad(e->origin, 2.5f);
+            make_flare_quad(e->origin, scale);
 
         GL_LockArrays(4);
         qglBeginQuery(gl_static.samples_passed, q->query);
@@ -624,31 +638,69 @@ bool GL_ShowErrors(const char *func)
     return true;
 }
 
-static void GL_WaterWarp(void)
+static void GL_PostProcess(glStateBits_t bits, int x, int y, int w, int h)
 {
-    float x0, x1, y0, y1;
-
-    GL_ForceTexture(TMU_TEXTURE, gl_static.warp_texture);
-    GL_BindArrays(VA_WATERWARP);
+    GL_BindArrays(VA_POSTPROCESS);
     GL_StateBits(GLS_DEPTHTEST_DISABLE | GLS_DEPTHMASK_FALSE |
-                 GLS_CULL_DISABLE | GLS_TEXTURE_REPLACE | GLS_WARP_ENABLE);
+                 GLS_CULL_DISABLE | GLS_TEXTURE_REPLACE | bits);
     GL_ArrayBits(GLA_VERTEX | GLA_TC);
-    GL_LoadUniforms();
+    gl_backend->load_uniforms();
 
-    x0 = glr.fd.x;
-    x1 = glr.fd.x + glr.fd.width;
-
-    y0 = glr.fd.y;
-    y1 = glr.fd.y + glr.fd.height;
-
-    Vector4Set(tess.vertices,      x0, y0, 0, 1);
-    Vector4Set(tess.vertices +  4, x0, y1, 0, 0);
-    Vector4Set(tess.vertices +  8, x1, y0, 1, 1);
-    Vector4Set(tess.vertices + 12, x1, y1, 1, 0);
+    Vector4Set(tess.vertices,      x,     y,     0, 1);
+    Vector4Set(tess.vertices +  4, x,     y + h, 0, 0);
+    Vector4Set(tess.vertices +  8, x + w, y,     1, 1);
+    Vector4Set(tess.vertices + 12, x + w, y + h, 1, 0);
 
     GL_LockArrays(4);
     qglDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     GL_UnlockArrays();
+}
+
+static void GL_DrawBloom(bool waterwarp)
+{
+    int iterations = Cvar_ClampInteger(gl_bloom, 1, 8) * 2;
+    int w = glr.fd.width / 4;
+    int h = glr.fd.height / 4;
+
+    qglViewport(0, 0, w, h);
+    GL_Ortho(0, w, h, 0, -1, 1);
+
+    // downscale
+    gls.u_block.fog_color[0] = 1.0f / w;
+    gls.u_block.fog_color[1] = 1.0f / h;
+    GL_ForceTexture(TMU_TEXTURE, TEXNUM_PP_BLOOM);
+    qglBindFramebuffer(GL_FRAMEBUFFER, FBO_BLUR_0);
+    GL_PostProcess(GLS_BLUR_BOX, 0, 0, w, h);
+
+    // blur X/Y
+    for (int i = 0; i < iterations; i++) {
+        int j = i & 1;
+
+        gls.u_block.fog_color[0] = 1.0f / w;
+        gls.u_block.fog_color[1] = 1.0f / h;
+        gls.u_block.fog_color[j] = 0;
+
+        GL_ForceTexture(TMU_TEXTURE, j ? TEXNUM_PP_BLUR_1 : TEXNUM_PP_BLUR_0);
+        qglBindFramebuffer(GL_FRAMEBUFFER, j ? FBO_BLUR_0 : FBO_BLUR_1);
+        GL_PostProcess(GLS_BLUR_GAUSS, 0, 0, w, h);
+    }
+
+    GL_Setup2D();
+
+    glStateBits_t bits = GLS_BLOOM_OUTPUT;
+    if (q_unlikely(gl_showbloom->integer)) {
+        GL_ForceTexture(TMU_TEXTURE, TEXNUM_PP_BLUR_0);
+        bits = GLS_DEFAULT;
+    } else {
+        GL_ForceTexture(TMU_TEXTURE, TEXNUM_PP_SCENE);
+        GL_ForceTexture(TMU_LIGHTMAP, TEXNUM_PP_BLUR_0);
+        if (waterwarp)
+            bits |= GLS_WARP_ENABLE;
+    }
+
+    // upscale & add
+    qglBindFramebuffer(GL_FRAMEBUFFER, 0);
+    GL_PostProcess(bits, glr.fd.x, glr.fd.y, glr.fd.width, glr.fd.height);
 }
 
 void R_RenderFrame(const refdef_t *fd)
@@ -663,32 +715,58 @@ void R_RenderFrame(const refdef_t *fd)
     glr.drawframe++;
 
     glr.fd = *fd;
-    glr.num_beams = 0;
-    glr.num_flares = 0;
+    glr.num_beams = glr.num_flares   = 0;
+    glr.fog_bits  = glr.fog_bits_sky = 0;
 
     if (gl_dynamic->integer != 1 || gl_vertexlight->integer)
         glr.fd.num_dlights = 0;
+
+    if (gl_static.use_shaders && gl_fog->integer > 0) {
+        if (glr.fd.fog.density > 0)
+            glr.fog_bits |= GLS_FOG_GLOBAL;
+        if (glr.fd.heightfog.density > 0 && glr.fd.heightfog.falloff > 0)
+            glr.fog_bits |= GLS_FOG_HEIGHT;
+        if (glr.fd.fog.sky_factor > 0)
+            glr.fog_bits_sky |= GLS_FOG_SKY;
+    }
 
     if (lm.dirty) {
         GL_RebuildLighting();
         lm.dirty = false;
     }
 
-    bool waterwarp = (glr.fd.rdflags & RDF_UNDERWATER) && gl_static.use_shaders && gl_waterwarp->integer;
+    bool waterwarp = false;
+    bool bloom = false;
 
-    if (waterwarp) {
-        if (glr.fd.width != glr.framebuffer_width || glr.fd.height != glr.framebuffer_height) {
-            glr.framebuffer_ok = GL_InitWarpTexture();
-            glr.framebuffer_width = glr.fd.width;
-            glr.framebuffer_height = glr.fd.height;
+    if (gl_static.use_shaders) {
+        waterwarp = (glr.fd.rdflags & RDF_UNDERWATER) && gl_waterwarp->integer;
+        bloom = !(glr.fd.rdflags & RDF_NOWORLDMODEL) && gl_bloom->integer;
+
+        if (waterwarp || bloom || gl_bloom->modified) {
+            if (glr.fd.width != glr.framebuffer_width || glr.fd.height != glr.framebuffer_height || gl_bloom->modified) {
+                glr.framebuffer_ok = GL_InitFramebuffers();
+                glr.framebuffer_width = glr.fd.width;
+                glr.framebuffer_height = glr.fd.height;
+                gl_bloom->modified = false;
+            }
+            if (!glr.framebuffer_ok)
+                waterwarp = bloom = false;
         }
-        waterwarp = glr.framebuffer_ok;
     }
 
-    if (waterwarp)
-        qglBindFramebuffer(GL_FRAMEBUFFER, gl_static.warp_framebuffer);
+    if (waterwarp || bloom) {
+        qglBindFramebuffer(GL_FRAMEBUFFER, FBO_SCENE);
+        glr.framebuffer_bound = true;
 
-    GL_Setup3D(waterwarp);
+        if (gl_clear->integer) {
+            GLenum buffers[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+            qglDrawBuffers(bloom + 1, buffers);
+            qglClear(GL_COLOR_BUFFER_BIT);
+            qglDrawBuffers(1, buffers);
+        }
+    }
+
+    GL_Setup3D();
 
     GL_SetupFrustum();
 
@@ -714,14 +792,20 @@ void R_RenderFrame(const refdef_t *fd)
 
     GL_DrawDebugObjects();
 
-    if (waterwarp)
+    if (glr.framebuffer_bound) {
         qglBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glr.framebuffer_bound = false;
+    }
 
     // go back into 2D mode
     GL_Setup2D();
 
-    if (waterwarp)
-        GL_WaterWarp();
+    if (bloom) {
+        GL_DrawBloom(waterwarp);
+    } else if (waterwarp) {
+        GL_ForceTexture(TMU_TEXTURE, TEXNUM_PP_SCENE);
+        GL_PostProcess(GLS_WARP_ENABLE, glr.fd.x, glr.fd.y, glr.fd.width, glr.fd.height);
+    }
 
     if (gl_polyblend->integer)
         GL_Blend();
@@ -905,6 +989,8 @@ static void GL_Register(void)
 #endif
     gl_damageblend_frac = Cvar_Get("gl_damageblend_frac", "0.2", 0);
     gl_waterwarp = Cvar_Get("gl_waterwarp", "0", 0);
+    gl_fog = Cvar_Get("gl_fog", "1", 0);
+    gl_bloom = Cvar_Get("gl_bloom", "0", 0);
     gl_swapinterval = Cvar_Get("gl_swapinterval", "1", CVAR_ARCHIVE);
     gl_swapinterval->changed = gl_swapinterval_changed;
 
@@ -917,6 +1003,7 @@ static void GL_Register(void)
     gl_showtris = Cvar_Get("gl_showtris", "0", CVAR_CHEAT);
     gl_showorigins = Cvar_Get("gl_showorigins", "0", CVAR_CHEAT);
     gl_showtearing = Cvar_Get("gl_showtearing", "0", CVAR_CHEAT);
+    gl_showbloom = Cvar_Get("gl_showbloom", "0", CVAR_CHEAT);
 #if USE_DEBUG
     gl_showstats = Cvar_Get("gl_showstats", "0", 0);
     gl_showscrap = Cvar_Get("gl_showscrap", "0", 0);

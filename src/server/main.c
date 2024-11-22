@@ -1022,6 +1022,9 @@ static void init_pmove_and_es_flags(client_t *newcl)
             if (IS_NEW_GAME_API) {
                 newcl->esFlags |= MSG_ES_EXTENSIONS_2;
                 newcl->psFlags |= MSG_PS_EXTENSIONS_2;
+                if (newcl->version >= PROTOCOL_VERSION_Q2PRO_PLAYERFOG) {
+                    newcl->psFlags |= MSG_PS_MOREBITS;
+                }
             }
         }
         force = 1;
@@ -1808,6 +1811,9 @@ static void SV_RunGameFrame(void)
     if (host_speeds->integer)
         time_after_game = Sys_Milliseconds();
 #endif
+
+    if (msg_write.overflowed)
+        Com_Error(ERR_DROP, "%s: message buffer overflowed", __func__);
 
     if (msg_write.cursize) {
         Com_WPrintf("Game left %u bytes "

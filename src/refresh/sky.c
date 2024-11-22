@@ -334,7 +334,7 @@ void R_DrawSkyBox(void)
         return; // nothing visible
 
     GL_BindArrays(VA_SPRITE);
-    GL_StateBits(GLS_TEXTURE_REPLACE);
+    GL_StateBits(GLS_TEXTURE_REPLACE | glr.fog_bits_sky);
     GL_ArrayBits(GLA_VERTEX | GLA_TC);
 
     for (i = 0; i < 6; i++) {
@@ -450,14 +450,20 @@ void R_SetSky(const char *name, float rotate, bool autorotate, const vec3_t axis
         return;
     }
 
+    Com_DDPrintf("%s: %s %.1f %d (%.1f %.1f %.1f)\n", __func__,
+                 name, rotate, autorotate, axis[0], axis[1], axis[2]);
+
+    if (VectorEmpty(axis))
+        rotate = 0;
+    if (!rotate)
+        autorotate = false;
+
     skyrotate = rotate;
     skyautorotate = autorotate;
     VectorNormalize2(axis, skyaxis);
     SetupRotationMatrix(skymatrix, skyaxis, skyrotate);
     if (gl_static.use_cubemaps)
         TransposeAxis(skymatrix);
-    if (!skyrotate)
-        skyautorotate = false;
 
     // try to load cubemap image first
     if (gl_static.use_cubemaps) {

@@ -43,7 +43,8 @@ static bool     dotshading;
 static float    celscale;
 
 static drawshadow_t drawshadow;
-static GLfloat      shadowmatrix[16];
+static mat4_t       m_shadow_view;
+static mat4_t       m_shadow_model;     // fog hack
 
 #if USE_MD5
 static md5_joint_t  temp_skeleton[MD5_MAX_JOINTS];
@@ -59,7 +60,7 @@ static void setup_dotshading(void)
     if (!gl_dotshading->integer)
         return;
 
-    if (glr.ent->flags & RF_SHELL_MASK)
+    if (glr.ent->flags & (RF_SHELL_MASK | RF_TRACKER))
         return;
 
     if (drawshadow == SHADOW_ONLY)
@@ -355,7 +356,7 @@ static void setup_frame_scale(const model_t *model)
 
 static void setup_color(void)
 {
-    int flags = glr.ent->flags;
+    uint64_t flags = glr.ent->flags;
     float f, m;
     int i;
 
@@ -381,6 +382,8 @@ static void setup_color(void)
         VectorSet(color, 1, 1, 1);
     } else if ((flags & RF_IR_VISIBLE) && (glr.fd.rdflags & RDF_IRGOGGLES)) {
         VectorSet(color, 1, 0, 0);
+    } else if (flags & RF_TRACKER) {
+        VectorClear(color);
     } else {
         GL_LightPoint(origin, color);
 
@@ -417,7 +420,7 @@ static void setup_celshading(void)
 {
     float value = Cvar_ClampValue(gl_celshading, 0, 10);
 
-    if (value == 0 || (glr.ent->flags & (RF_TRANSLUCENT | RF_SHELL_MASK)) || !qglPolygonMode || !qglLineWidth)
+    if (value == 0 || (glr.ent->flags & (RF_TRANSLUCENT | RF_SHELL_MASK | RF_TRACKER)) || !qglPolygonMode || !qglLineWidth)
         celscale = 0;
     else
         celscale = 1.0f - Distance(origin, glr.fd.vieworg) / 700.0f;
@@ -439,7 +442,7 @@ static void draw_celshading(const uint16_t *indices, int num_indices)
         return;
 
     GL_BindTexture(TMU_TEXTURE, TEXNUM_BLACK);
-    GL_StateBits(GLS_BLEND_BLEND | (meshbits & ~GLS_MESH_SHADE));
+    GL_StateBits(GLS_BLEND_BLEND | (meshbits & ~GLS_MESH_SHADE) | glr.fog_bits);
     if (gls.currentva)
         GL_ArrayBits(GLA_VERTEX);
 
@@ -499,7 +502,7 @@ static drawshadow_t cull_shadow(const model_t *model)
     return SHADOW_YES;
 }
 
-static void proj_matrix(GLfloat *matrix, const cplane_t *plane, const vec3_t dir)
+static void proj_matrix(mat4_t matrix, const cplane_t *plane, const vec3_t dir)
 {
     matrix[ 0] =  plane->normal[1] * dir[1] + plane->normal[2] * dir[2];
     matrix[ 4] = -plane->normal[1] * dir[0];
@@ -524,7 +527,7 @@ static void proj_matrix(GLfloat *matrix, const cplane_t *plane, const vec3_t dir
 
 static void setup_shadow(void)
 {
-    GLfloat matrix[16], tmp[16];
+    mat4_t m_proj, m_rot;
     vec3_t dir;
 
     if (!drawshadow)
@@ -537,12 +540,13 @@ static void setup_shadow(void)
         VectorSet(dir, 0, 0, 1);
 
     // project shadow on ground plane
-    proj_matrix(matrix, &glr.lightpoint.plane, dir);
-    GL_MultMatrix(tmp, glr.viewmatrix, matrix);
+    proj_matrix(m_proj, &glr.lightpoint.plane, dir);
 
     // rotate for entity
-    GL_RotationMatrix(matrix);
-    GL_MultMatrix(shadowmatrix, tmp, matrix);
+    GL_RotationMatrix(m_rot);
+
+    GL_MultMatrix(m_shadow_model, m_proj, m_rot);
+    GL_MultMatrix(m_shadow_view, glr.viewmatrix, m_shadow_model);
 }
 
 static void draw_shadow(const uint16_t *indices, int num_indices)
@@ -550,8 +554,12 @@ static void draw_shadow(const uint16_t *indices, int num_indices)
     if (!drawshadow)
         return;
 
+    // fog hack
+    if (glr.fog_bits)
+        memcpy(gls.u_block.m_model, m_shadow_model, sizeof(gls.u_block.m_model));
+
     // load shadow projection matrix
-    GL_LoadMatrix(shadowmatrix);
+    GL_LoadMatrix(m_shadow_view);
 
     // eliminate z-fighting by utilizing stencil buffer, if available
     if (gl_config.stencilbits) {
@@ -561,7 +569,7 @@ static void draw_shadow(const uint16_t *indices, int num_indices)
     }
 
     GL_BindTexture(TMU_TEXTURE, TEXNUM_WHITE);
-    GL_StateBits(GLS_BLEND_BLEND | (meshbits & ~GLS_MESH_SHADE));
+    GL_StateBits(GLS_BLEND_BLEND | (meshbits & ~GLS_MESH_SHADE) | glr.fog_bits);
     if (gls.currentva)
         GL_ArrayBits(GLA_VERTEX);
 
@@ -580,6 +588,10 @@ static void draw_shadow(const uint16_t *indices, int num_indices)
         qglDisable(GL_STENCIL_TEST);
         gl_static.stencil_buffer_bit |= GL_STENCIL_BUFFER_BIT;
     }
+
+    // fog hack
+    if (glr.fog_bits)
+        GL_RotationMatrix(gls.u_block.m_model);
 }
 
 static const image_t *skin_for_mesh(image_t **skins, int num_skins)
@@ -663,7 +675,7 @@ static void draw_alias_mesh(const uint16_t *indices, int num_indices,
         qglColorMask(1, 1, 1, 1);
     }
 
-    state = GLS_INTENSITY_ENABLE;
+    state = GLS_INTENSITY_ENABLE | glr.fog_bits;
     if (!gls.currentva)
         state |= meshbits;
     else if (dotshading)
@@ -675,6 +687,12 @@ static void draw_alias_mesh(const uint16_t *indices, int num_indices,
     skin = skin_for_mesh(skins, num_skins);
     if (skin->texnum2)
         state |= GLS_GLOWMAP_ENABLE;
+
+    if (glr.framebuffer_bound && gl_bloom->integer) {
+        state |= GLS_BLOOM_GENERATE;
+        if (glr.ent->flags & RF_SHELL_MASK)
+            state |= GLS_BLOOM_SHELL;
+    }
 
     GL_StateBits(state);
 
@@ -797,7 +815,7 @@ static void lerp_alias_skeleton(const md5_model_t *model)
 #pragma GCC reset_options
 #endif
 
-static void bind_skel_arrays(const md5_mesh_t *mesh, const md5_joint_t *skel)
+static void bind_skel_arrays(const md5_mesh_t *mesh)
 {
     if (gl_config.caps & QGL_CAP_SHADER_STORAGE) {
         qglBindBufferRange(GL_SHADER_STORAGE_BUFFER, SSBO_WEIGHTS, buffer,
@@ -830,7 +848,7 @@ static void bind_skel_arrays(const md5_mesh_t *mesh, const md5_joint_t *skel)
 static void draw_skeleton_mesh(const md5_model_t *model, const md5_mesh_t *mesh, const md5_joint_t *skel)
 {
     if (buffer)
-        bind_skel_arrays(mesh, skel);
+        bind_skel_arrays(mesh);
     else if (glr.ent->flags & RF_SHELL_MASK)
         tess_shell_skel(mesh, skel);
     else if (dotshading)
@@ -842,11 +860,6 @@ static void draw_skeleton_mesh(const md5_model_t *model, const md5_mesh_t *mesh,
                     mesh->tcoords, mesh->num_verts,
                     model->skins, model->num_skins);
 }
-
-typedef struct {
-    vec4_t pos;
-    vec4_t axis[3];
-} glJoint_t;
 
 static void draw_alias_skeleton(const md5_model_t *model)
 {

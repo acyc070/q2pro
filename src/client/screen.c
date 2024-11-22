@@ -67,6 +67,13 @@ static cvar_t   *scr_showpmove;
 #endif
 static cvar_t   *scr_showturtle;
 
+static cvar_t   *scr_netgraph;
+static cvar_t   *scr_timegraph;
+static cvar_t   *scr_debuggraph;
+static cvar_t   *scr_graphheight;
+static cvar_t   *scr_graphscale;
+static cvar_t   *scr_graphshift;
+
 static cvar_t   *scr_draw2d;
 static cvar_t   *scr_lag_x;
 static cvar_t   *scr_lag_y;
@@ -160,21 +167,28 @@ void SCR_DrawStringMulti(int x, int y, int flags, size_t maxlen,
 {
     char    *p;
     size_t  len;
+    int     last_x = x;
+    int     last_y = y;
 
     while (*s && maxlen) {
         p = strchr(s, '\n');
         if (!p) {
-            SCR_DrawStringEx(x, y, flags, maxlen, s, font);
+            last_x = SCR_DrawStringEx(x, y, flags, maxlen, s, font);
+            last_y = y;
             break;
         }
 
         len = min(p - s, maxlen);
-        SCR_DrawStringEx(x, y, flags, len, s, font);
+        last_x = SCR_DrawStringEx(x, y, flags, len, s, font);
+        last_y = y;
         maxlen -= len;
 
         y += CHAR_HEIGHT;
         s = p + 1;
     }
+
+    if (flags & UI_DRAWCURSOR && com_localTime & BIT(8))
+        R_DrawChar(last_x, last_y, flags, 11, font);
 }
 
 
@@ -279,6 +293,112 @@ int SCR_GetCinematicCrop(unsigned framenum, int64_t filesize)
 ===============================================================================
 
 BAR GRAPHS
+
+===============================================================================
+*/
+
+/*
+==============
+SCR_AddNetgraph
+
+A new packet was just parsed
+==============
+*/
+void SCR_AddNetgraph(void)
+{
+    int         i, color;
+    unsigned    ping;
+
+    // if using the debuggraph for something else, don't
+    // add the net lines
+    if (scr_debuggraph->integer || scr_timegraph->integer)
+        return;
+
+    for (i = 0; i < cls.netchan.dropped; i++)
+        SCR_DebugGraph(30, 0x40);
+
+    for (i = 0; i < cl.suppress_count; i++)
+        SCR_DebugGraph(30, 0xdf);
+
+    if (scr_netgraph->integer > 1) {
+        ping = msg_read.cursize;
+        if (ping < 200)
+            color = 61;
+        else if (ping < 500)
+            color = 59;
+        else if (ping < 800)
+            color = 57;
+        else if (ping < 1200)
+            color = 224;
+        else
+            color = 242;
+        ping /= 40;
+    } else {
+        // see what the latency was on this packet
+        i = cls.netchan.incoming_acknowledged & CMD_MASK;
+        ping = (cls.realtime - cl.history[i].sent) / 30;
+        color = 0xd0;
+    }
+
+    SCR_DebugGraph(min(ping, 30), color);
+}
+
+#define GRAPH_SAMPLES   4096
+#define GRAPH_MASK      (GRAPH_SAMPLES - 1)
+
+static struct {
+    float       values[GRAPH_SAMPLES];
+    byte        colors[GRAPH_SAMPLES];
+    unsigned    current;
+} graph;
+
+/*
+==============
+SCR_DebugGraph
+==============
+*/
+void SCR_DebugGraph(float value, int color)
+{
+    graph.values[graph.current & GRAPH_MASK] = value;
+    graph.colors[graph.current & GRAPH_MASK] = color;
+    graph.current++;
+}
+
+/*
+==============
+SCR_DrawDebugGraph
+==============
+*/
+static void SCR_DrawDebugGraph(void)
+{
+    int     a, y, w, i, h, height;
+    float   v, scale, shift;
+
+    scale = scr_graphscale->value;
+    shift = scr_graphshift->value;
+    height = scr_graphheight->integer;
+    if (height < 1)
+        return;
+
+    w = scr.hud_width;
+    y = scr.hud_height;
+
+    for (a = 0; a < w; a++) {
+        i = (graph.current - 1 - a) & GRAPH_MASK;
+        v = graph.values[i] * scale + shift;
+
+        if (v < 0)
+            v += height * (1 + (int)(-v / height));
+
+        h = (int)v % height;
+        R_DrawFill8(w - 1 - a, y - h, 1, h, graph.colors[i]);
+    }
+}
+
+/*
+===============================================================================
+
+DEMO BAR
 
 ===============================================================================
 */
@@ -446,7 +566,7 @@ void SCR_CenterPrint(const char *str, bool typewrite)
 static void SCR_DrawCenterString(void)
 {
     centerprint_t *cp;
-    int y;
+    int y, flags;
     float alpha;
     size_t maxlen;
 
@@ -470,13 +590,16 @@ static void SCR_DrawCenterString(void)
     R_SetAlpha(alpha * scr_alpha->value);
 
     y = scr.hud_height / 4 - cp->lines * CHAR_HEIGHT / 2;
+    flags = UI_CENTER;
 
-    if (cp->typewrite)
+    if (cp->typewrite) {
         maxlen = scr_printspeed->value * 0.001f * (cls.realtime - cp->start);
-    else
+        flags |= UI_DROPSHADOW | UI_DRAWCURSOR;
+    } else {
         maxlen = MAX_STRING_CHARS;
+    }
 
-    SCR_DrawStringMulti(scr.hud_width / 2, y, UI_CENTER,
+    SCR_DrawStringMulti(scr.hud_width / 2, y, flags,
                         maxlen, cp->string, scr.font_pic);
 
     R_SetAlpha(scr_alpha->value);
@@ -1321,6 +1444,13 @@ void SCR_Init(void)
     scr_crosshair = Cvar_Get("crosshair", "0", CVAR_ARCHIVE);
     scr_crosshair->changed = scr_crosshair_changed;
 
+    scr_netgraph = Cvar_Get("netgraph", "0", 0);
+    scr_timegraph = Cvar_Get("timegraph", "0", 0);
+    scr_debuggraph = Cvar_Get("debuggraph", "0", 0);
+    scr_graphheight = Cvar_Get("graphheight", "32", 0);
+    scr_graphscale = Cvar_Get("graphscale", "1", 0);
+    scr_graphshift = Cvar_Get("graphshift", "0", 0);
+
     scr_chathud = Cvar_Get("scr_chathud", "0", 0);
     scr_chathud_lines = Cvar_Get("scr_chathud_lines", "4", 0);
     scr_chathud_time = Cvar_Get("scr_chathud_time", "0", 0);
@@ -2158,6 +2288,12 @@ static void SCR_Draw2D(void)
     // the rest of 2D elements share common alpha
     R_ClearColor();
     R_SetAlpha(Cvar_ClampValue(scr_alpha, 0, 1));
+
+    if (scr_timegraph->integer)
+        SCR_DebugGraph(cls.frametime * 300, 0xdc);
+
+    if (scr_debuggraph->integer || scr_timegraph->integer || scr_netgraph->integer)
+        SCR_DrawDebugGraph();
 
     SCR_DrawStats();
 

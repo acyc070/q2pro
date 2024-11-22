@@ -166,7 +166,7 @@ static void emit_delta_frame(const server_frame_t *from, const server_frame_t *t
     MSG_WriteLong(tonum);
     MSG_WriteLong(fromnum); // what we are delta'ing from
     if (cls.serverProtocol != PROTOCOL_VERSION_OLD)
-        MSG_WriteByte(0);   // rate dropped packets
+        MSG_WriteByte(cl.suppress_count);   // rate dropped packets
 
     // send over the areabits
     MSG_WriteByte(to->areabytes);
@@ -224,7 +224,9 @@ void CL_EmitDemoFrame(void)
     // emit and flush frame
     emit_delta_frame(oldframe, &cl.frame, lastframe, FRAME_CUR);
 
-    if (cls.demo.buffer.cursize + msg_write.cursize > cls.demo.buffer.maxsize) {
+    if (msg_write.overflowed) {
+        Com_WPrintf("%s: message buffer overflowed\n", __func__);
+    } else if (cls.demo.buffer.cursize + msg_write.cursize > cls.demo.buffer.maxsize) {
         Com_DPrintf("Demo frame overflowed (%u + %u > %u)\n",
                     cls.demo.buffer.cursize, msg_write.cursize, cls.demo.buffer.maxsize);
         cls.demo.frames_dropped++;
@@ -418,7 +420,7 @@ static void CL_Record_f(void)
     // send the serverdata
     MSG_WriteByte(svc_serverdata);
     if (cl.csr.extended)
-        MSG_WriteLong(PROTOCOL_VERSION_EXTENDED);
+        MSG_WriteLong(PROTOCOL_VERSION_EXTENDED_CURRENT);
     else
         MSG_WriteLong(min(cls.serverProtocol, PROTOCOL_VERSION_DEFAULT));
     MSG_WriteLong(cl.servercount);
@@ -850,16 +852,20 @@ void CL_EmitDemoSnapshot(void)
     MSG_WriteByte(svc_layout);
     MSG_WriteString(cl.layout);
 
-    snap = Z_Malloc(sizeof(*snap) + msg_write.cursize - 1);
-    snap->framenum = cls.demo.frames_read;
-    snap->filepos = pos;
-    snap->msglen = msg_write.cursize;
-    memcpy(snap->data, msg_write.data, msg_write.cursize);
+    if (msg_write.overflowed) {
+        Com_WPrintf("%s: message buffer overflowed\n", __func__);
+    } else {
+        snap = Z_Malloc(sizeof(*snap) + msg_write.cursize - 1);
+        snap->framenum = cls.demo.frames_read;
+        snap->filepos = pos;
+        snap->msglen = msg_write.cursize;
+        memcpy(snap->data, msg_write.data, msg_write.cursize);
 
-    cls.demo.snapshots = Z_Realloc(cls.demo.snapshots, sizeof(cls.demo.snapshots[0]) * Q_ALIGN(cls.demo.numsnapshots + 1, MIN_SNAPSHOTS));
-    cls.demo.snapshots[cls.demo.numsnapshots++] = snap;
+        cls.demo.snapshots = Z_Realloc(cls.demo.snapshots, sizeof(cls.demo.snapshots[0]) * Q_ALIGN(cls.demo.numsnapshots + 1, MIN_SNAPSHOTS));
+        cls.demo.snapshots[cls.demo.numsnapshots++] = snap;
 
-    Com_DPrintf("[%d] snaplen %u\n", cls.demo.frames_read, msg_write.cursize);
+        Com_DPrintf("[%d] snaplen %u\n", cls.demo.frames_read, msg_write.cursize);
+    }
 
     SZ_Clear(&msg_write);
 
@@ -1179,7 +1185,7 @@ bool CL_GetDemoInfo(const char *path, demoInfo_t *info)
             goto fail;
         }
         c = MSG_ReadLong();
-        if (c == PROTOCOL_VERSION_EXTENDED || c == PROTOCOL_VERSION_EXTENDED_OLD) {
+        if (EXTENDED_SUPPORTED(c)) {
             csr = &cs_remap_new;
         } else if (c < PROTOCOL_VERSION_OLD || c > PROTOCOL_VERSION_DEFAULT) {
             goto fail;
