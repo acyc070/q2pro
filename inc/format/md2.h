@@ -29,8 +29,8 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define MD2_IDENT       MakeLittleLong('I','D','P','2')
 #define MD2_VERSION     8
 
-#define MD2_MAX_TRIANGLES   18446744073709551615
-#define MD2_MAX_VERTS       18446744073709551615
+#define MD2_MAX_TRIANGLES   2147483647
+#define MD2_MAX_VERTS       2147483647
 #define MD2_MAX_FRAMES      65536
 #define MD2_MAX_SKINS       65536
 #define MD2_MAX_SKINNAME    99
