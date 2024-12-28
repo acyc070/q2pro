@@ -31,8 +31,8 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 // limits
 #define MD3_MAX_LODS        3
-#define MD3_MAX_TRIANGLES   18446744073709551615    // per mesh
-#define MD3_MAX_VERTS       18446744073709551615   // per mesh
+#define MD3_MAX_TRIANGLES   2147483647
+#define MD3_MAX_VERTS       2147483647
 #define MD3_MAX_SKINS       65536     // per mesh
 #define MD3_MAX_FRAMES      65536    // per model
 #define MD3_MAX_MESHES      65536      // per model
