@@ -264,6 +264,7 @@ typedef struct {
     char        gamedir[MAX_QPATH];
     int         clientNum;            // never changed during gameplay, set by serverdata packet
     int         maxclients;
+    int         max_stats;
     pmoveParams_t pmp;
 
 #if USE_FPS
@@ -544,10 +545,10 @@ extern cvar_t   *cl_nolerp;
 
 #if USE_DEBUG
 #define SHOWNET(level, ...) \
-    do { if (cl_shownet->integer > level) \
+    do { if (cl_shownet->integer >= level) \
         Com_LPrintf(PRINT_DEVELOPER, __VA_ARGS__); } while (0)
 #define SHOWCLAMP(level, ...) \
-    do { if (cl_showclamp->integer > level) \
+    do { if (cl_showclamp->integer >= level) \
         Com_LPrintf(PRINT_DEVELOPER, __VA_ARGS__); } while (0)
 #define SHOWMISS(...) \
     do { if (cl_showmiss->integer) \
@@ -1089,8 +1090,3 @@ void CL_GTV_Shutdown(void);
 #define CL_GTV_Init()                   (void)0
 #define CL_GTV_Shutdown()               (void)0
 #endif
-
-//
-// crc.c
-//
-byte COM_BlockSequenceCRCByte(const byte *base, size_t length, int sequence);
