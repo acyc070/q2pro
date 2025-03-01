@@ -121,7 +121,6 @@ typedef struct {
     uint32_t        inverse_intensity_100;
     int             nolm_mask;
     int             hunk_align;
-    int             hunk_maxsize;
     float           sintab[256];
     byte            latlngtab[NUMVERTEXNORMALS][2];
     byte            lightstylemap[MAX_LIGHTSTYLES];
@@ -191,6 +190,7 @@ typedef struct {
     int     max_texture_size_log2;
     int     max_texture_size;
     int     ssbo_align;
+    bool    webgl;
 } glConfig_t;
 
 extern glStatic_t gl_static;
@@ -453,7 +453,7 @@ typedef struct {
         mspriteframe_t *spriteframes;
     };
 
-    GLuint buffer;
+    GLuint buffers[2];
 } model_t;
 
 // xyz[3] | color[1]  | st[2]    | lmst[2]
@@ -840,7 +840,7 @@ void GL_ForceTexture(glTmu_t tmu, GLuint texnum);
 void GL_BindTexture(glTmu_t tmu, GLuint texnum);
 void GL_ForceCubemap(GLuint texnum);
 void GL_BindCubemap(GLuint texnum);
-void GL_DeleteBuffer(GLuint buffer);
+void GL_DeleteBuffers(GLsizei n, const GLuint *buffers);
 void GL_CommonStateBits(glStateBits_t bits);
 void GL_ScrollPos(vec2_t scroll, glStateBits_t bits);
 void GL_DrawOutlines(GLsizei count, GLenum type, const void *indices);

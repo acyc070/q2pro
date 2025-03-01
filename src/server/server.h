@@ -468,7 +468,9 @@ typedef struct {
     bool        initialized;        // sv_init has completed
     unsigned    realtime;           // always increasing, no clamping, etc
 
-    client_t    *client_pool;   // [maxclients]
+    int         maxclients_soft;    // minus reserved slots
+    int         maxclients;
+    client_t    *client_pool;       // [maxclients]
 
 #if USE_ZLIB
     z_stream        z;  // for compressing messages at once
@@ -755,7 +757,7 @@ void SV_PrintMiscInfo(void);
 static inline void SV_CheckEntityNumber(edict_t *ent, int e, const char *func)
 {
     if (q_unlikely(ent->s.number != e)) {
-        Com_WPrintf("%s: fixing ent->s.number: %d to %d\n", func, ent->s.number, e);
+        Com_DWPrintf("%s: fixing ent->s.number: %d to %d\n", func, ent->s.number, e);
         ent->s.number = e;
     }
 }
