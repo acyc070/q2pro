@@ -1111,7 +1111,7 @@ void Qcommon_Frame(void)
     }
 
     if (fixedtime->integer) {
-        Cvar_ClampInteger(fixedtime, 1, 1000);
+        Cvar_ClampInteger(fixedtime, 1, 10000);
         msec = fixedtime->integer;
     } else if (timescale->value > 0) {
         frac += msec * timescale->value;
