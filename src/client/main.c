@@ -2202,7 +2202,7 @@ static size_t CL_Timer_m(char *buffer, size_t size)
 {
     int hour, min, sec;
 
-    sec = cl.time / 1000;
+    sec = cl.time / 10000;
     min = sec / 60; sec %= 60;
     hour = min / 60; min %= 60;
 
