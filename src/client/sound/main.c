@@ -799,13 +799,15 @@ int S_GetSampleRate(void)
 // Update sound buffer
 // =======================================================================
 
-void S_BuildSoundList(int *sounds)
+int S_BuildSoundList(int *sounds)
 {
-    int         i;
-    int         num;
+    int             i, num, count;
     centity_state_t *ent;
 
-    for (i = 0; i < cl.frame.numEntities; i++) {
+    if (cls.state != ca_active || !s_active || sv_paused->integer || !s_ambient->integer)
+        return 0;
+
+    for (i = count = 0; i < cl.frame.numEntities; i++) {
         num = (cl.frame.firstEntity + i) & PARSE_ENTITIES_MASK;
         ent = &cl.entityStates[num];
         if (s_ambient->integer == 2 && !ent->modelindex) {
@@ -814,8 +816,12 @@ void S_BuildSoundList(int *sounds)
             sounds[i] = 0;
         } else {
             sounds[i] = ent->sound;
+            if (ent->sound)
+                count++;
         }
     }
+
+    return count;
 }
 
 float S_GetEntityLoopVolume(const centity_state_t *ent)
@@ -836,6 +842,51 @@ float S_GetEntityLoopDistMult(const centity_state_t *ent)
     }
 
     return SOUND_LOOPATTENUATE;
+}
+
+/*
+=================
+S_SpatializeOrigin
+
+Used for spatializing channels and autosounds
+=================
+*/
+void S_SpatializeOrigin(const vec3_t origin, float master_vol, float dist_mult, float *left_vol, float *right_vol, bool stereo)
+{
+    vec_t       dot;
+    vec_t       dist;
+    vec_t       lscale, rscale, scale;
+    vec3_t      source_vec;
+
+// calculate stereo seperation and distance attenuation
+    VectorSubtract(origin, listener_origin, source_vec);
+
+    dist = VectorNormalize(source_vec);
+    dist -= SOUND_FULLVOLUME;
+    if (dist < 0)
+        dist = 0;           // close enough to be at full volume
+    dist *= dist_mult;      // different attenuation levels
+
+    if (!stereo || !dist_mult) {
+        // no attenuation = no spatialization
+        rscale = 1.0f;
+        lscale = 1.0f;
+    } else {
+        dot = DotProduct(listener_right, source_vec);
+        rscale = 0.5f * (1.0f + dot);
+        lscale = 0.5f * (1.0f - dot);
+    }
+
+    // add in distance effect
+    scale = (1.0f - dist) * rscale;
+    *right_vol = master_vol * scale;
+    if (*right_vol < 0)
+        *right_vol = 0;
+
+    scale = (1.0f - dist) * lscale;
+    *left_vol = master_vol * scale;
+    if (*left_vol < 0)
+        *left_vol = 0;
 }
 
 /*

@@ -72,24 +72,11 @@ cvar_t  *sv_maplist;
 
 cvar_t  *sv_features;
 
-void SpawnEntities(const char *mapname, const char *entities, const char *spawnpoint);
-void ClientThink(edict_t *ent, usercmd_t *cmd);
-qboolean ClientConnect(edict_t *ent, char *userinfo);
-void ClientUserinfoChanged(edict_t *ent, char *userinfo);
-void ClientDisconnect(edict_t *ent);
-void ClientBegin(edict_t *ent);
-void ClientCommand(edict_t *ent);
-void RunEntity(edict_t *ent);
-void WriteGame(const char *filename, qboolean autosave);
-void ReadGame(const char *filename);
-void WriteLevel(const char *filename);
-void ReadLevel(const char *filename);
-void InitGame(void);
-void G_RunFrame(void);
+static void G_RunFrame(void);
 
 //===================================================================
 
-void ShutdownGame(void)
+static void ShutdownGame(void)
 {
     gi.dprintf("==== ShutdownGame ====\n");
 
@@ -108,7 +95,7 @@ only happens when a new game is started or a save game
 is loaded.
 ============
 */
-void InitGame(void)
+static void InitGame(void)
 {
     int features = G_FEATURES;
 
@@ -275,7 +262,7 @@ void Com_Error(error_type_t type, const char *fmt, ...)
 ClientEndServerFrames
 =================
 */
-void ClientEndServerFrames(void)
+static void ClientEndServerFrames(void)
 {
     int     i;
     edict_t *ent;
@@ -297,7 +284,7 @@ CreateTargetChangeLevel
 Returns the created target changelevel
 =================
 */
-edict_t *CreateTargetChangeLevel(char *map)
+static edict_t *CreateTargetChangeLevel(char *map)
 {
     edict_t *ent;
 
@@ -316,7 +303,7 @@ EndDMLevel
 The timelimit or fraglimit has been exceeded
 =================
 */
-void EndDMLevel(void)
+static void EndDMLevel(void)
 {
     edict_t     *ent;
     char *s, *t, *f;
@@ -373,7 +360,7 @@ void EndDMLevel(void)
 CheckNeedPass
 =================
 */
-void CheckNeedPass(void)
+static void CheckNeedPass(void)
 {
     int need;
 
@@ -398,7 +385,7 @@ void CheckNeedPass(void)
 CheckDMRules
 =================
 */
-void CheckDMRules(void)
+static void CheckDMRules(void)
 {
     int         i;
     gclient_t   *cl;
@@ -437,7 +424,7 @@ void CheckDMRules(void)
 ExitLevel
 =============
 */
-void ExitLevel(void)
+static void ExitLevel(void)
 {
     int     i;
     edict_t *ent;
@@ -467,7 +454,7 @@ G_RunFrame
 Advances the world by 0.1 seconds
 ================
 */
-void G_RunFrame(void)
+static void G_RunFrame(void)
 {
     int     i;
     edict_t *ent;

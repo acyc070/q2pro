@@ -27,8 +27,15 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #define QALAPI
 #include "qal.h"
 
+#ifndef ALC_SOFT_output_mode
+#define ALC_OUTPUT_MODE_SOFT    0x19AC
+#define ALC_STEREO_BASIC_SOFT   0x19AE
+#endif
+
 static LPALCCLOSEDEVICE qalcCloseDevice;
 static LPALCCREATECONTEXT qalcCreateContext;
+static LPALCGETINTEGERV qalcGetIntegerv;
+static LPALCGETSTRING qalcGetString;
 static LPALCDESTROYCONTEXT qalcDestroyContext;
 static LPALCISEXTENSIONPRESENT qalcIsExtensionPresent;
 static LPALCMAKECONTEXTCURRENT qalcMakeContextCurrent;
@@ -53,6 +60,8 @@ static const alsection_t sections[] = {
             QALC_FN(CloseDevice),
             QALC_FN(CreateContext),
             QALC_FN(DestroyContext),
+            QALC_FN(GetIntegerv),
+            QALC_FN(GetString),
             QALC_FN(IsExtensionPresent),
             QALC_FN(MakeContextCurrent),
             QALC_FN(OpenDevice),
@@ -145,7 +154,30 @@ static const char *const al_drivers[] = {
 #endif
 };
 
-bool QAL_Init(void)
+static const char *get_device_list(void)
+{
+    if (qalcIsExtensionPresent(NULL, "ALC_ENUMERATE_ALL_EXT"))
+        return qalcGetString(NULL, ALC_ALL_DEVICES_SPECIFIER);
+
+    return qalcGetString(NULL, ALC_DEVICE_SPECIFIER);
+}
+
+static void print_device_list(void)
+{
+    const char *list = get_device_list();
+    if (!list || !*list) {
+        Com_Printf("No devices available\n");
+        return;
+    }
+
+    Com_Printf("Available devices:\n");
+    do {
+        Com_Printf("%s\n", list);
+        list += strlen(list) + 1;
+    } while (*list);
+}
+
+int QAL_Init(void)
 {
     const alsection_t *sec;
     const alfunction_t *func;
@@ -160,7 +192,7 @@ bool QAL_Init(void)
             break;
     }
     if (!handle)
-        return false;
+        return -1;
 
     for (i = 0, sec = sections; i < q_countof(sections); i++, sec++) {
         if (sec->extension)
@@ -174,11 +206,18 @@ bool QAL_Init(void)
         }
     }
 
+    if (!strcmp(al_device->string, "?")) {
+        print_device_list();
+        Cvar_Reset(al_device);
+    }
+
     device = qalcOpenDevice(al_device->string[0] ? al_device->string : NULL);
     if (!device) {
         Com_SetLastError(va("alcOpenDevice(%s) failed", al_device->string));
         goto fail;
     }
+
+    Com_DDPrintf("ALC_EXTENSIONS: %s\n", qalcGetString(device, ALC_EXTENSIONS));
 
     if (al_hrtf->integer != 1 && qalcIsExtensionPresent(device, "ALC_SOFT_HRTF")) {
         ALCint attrs[] = {
@@ -227,9 +266,17 @@ bool QAL_Init(void)
     if (qalcIsExtensionPresent(device, "ALC_SOFT_HRTF"))
         al_hrtf->flags |= CVAR_SOUND;
 
-    return true;
+    if (qalcIsExtensionPresent(device, "ALC_SOFT_output_mode")) {
+        ALCint mode = 0;
+        qalcGetIntegerv(device, ALC_OUTPUT_MODE_SOFT, 1, &mode);
+        Com_DDPrintf("ALC_OUTPUT_MODE_SOFT: %#x\n", mode);
+        if (mode != ALC_STEREO_BASIC_SOFT)
+            return 1;
+    }
+
+    return 0;
 
 fail:
     QAL_Shutdown();
-    return false;
+    return -1;
 }

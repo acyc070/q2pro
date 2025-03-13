@@ -18,8 +18,6 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "g_local.h"
 #include "m_player.h"
 
-void ClientUserinfoChanged(edict_t *ent, char *userinfo);
-
 void SP_misc_teleporter_dest(edict_t *ent);
 
 //
@@ -167,7 +165,7 @@ void player_pain(edict_t *self, edict_t *other, float kick, int damage)
     // player pain is handled at the end of the frame in P_DamageFeedback
 }
 
-bool IsFemale(edict_t *ent)
+static bool IsFemale(edict_t *ent)
 {
     char        *info;
 
@@ -180,7 +178,7 @@ bool IsFemale(edict_t *ent)
     return false;
 }
 
-bool IsNeutral(edict_t *ent)
+static bool IsNeutral(edict_t *ent)
 {
     char        *info;
 
@@ -193,7 +191,7 @@ bool IsNeutral(edict_t *ent)
     return false;
 }
 
-void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
+static void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
 {
     int         mod;
     char        *message;
@@ -382,7 +380,7 @@ void ClientObituary(edict_t *self, edict_t *inflictor, edict_t *attacker)
 
 void Touch_Item(edict_t *ent, edict_t *other, cplane_t *plane, csurface_t *surf);
 
-void TossClientWeapon(edict_t *self)
+static void TossClientWeapon(edict_t *self)
 {
     const gitem_t   *item;
     edict_t     *drop;
@@ -432,7 +430,7 @@ void TossClientWeapon(edict_t *self)
 LookAtKiller
 ==================
 */
-void LookAtKiller(edict_t *self, edict_t *inflictor, edict_t *attacker)
+static void LookAtKiller(edict_t *self, edict_t *inflictor, edict_t *attacker)
 {
     vec3_t      dir;
 
@@ -456,7 +454,6 @@ void LookAtKiller(edict_t *self, edict_t *inflictor, edict_t *attacker)
     }
     if (self->client->killer_yaw < 0)
         self->client->killer_yaw += 360;
-
 }
 
 /*
@@ -563,7 +560,7 @@ This is only called when the game first initializes in single player,
 but is called after each death and level change in deathmatch
 ==============
 */
-void InitClientPersistant(gclient_t *client)
+static void InitClientPersistant(gclient_t *client)
 {
     const gitem_t   *item;
 
@@ -588,7 +585,7 @@ void InitClientPersistant(gclient_t *client)
     client->pers.connected = true;
 }
 
-void InitClientResp(gclient_t *client)
+static void InitClientResp(gclient_t *client)
 {
     memset(&client->resp, 0, sizeof(client->resp));
     client->resp.enterframe = level.framenum;
@@ -646,7 +643,7 @@ PlayersRangeFromSpot
 Returns the distance to the nearest player from the given spot
 ================
 */
-float   PlayersRangeFromSpot(edict_t *spot)
+static float PlayersRangeFromSpot(edict_t *spot)
 {
     edict_t *player;
     float   bestplayerdistance;
@@ -683,7 +680,7 @@ go to a random point, but NOT the two points closest
 to other players
 ================
 */
-edict_t *SelectRandomDeathmatchSpawnPoint(void)
+static edict_t *SelectRandomDeathmatchSpawnPoint(void)
 {
     edict_t *spot, *spot1, *spot2;
     int     count = 0;
@@ -732,7 +729,7 @@ SelectFarthestDeathmatchSpawnPoint
 
 ================
 */
-edict_t *SelectFarthestDeathmatchSpawnPoint(void)
+static edict_t *SelectFarthestDeathmatchSpawnPoint(void)
 {
     edict_t *bestspot;
     float   bestdistance, bestplayerdistance;
@@ -761,7 +758,7 @@ edict_t *SelectFarthestDeathmatchSpawnPoint(void)
     return spot;
 }
 
-edict_t *SelectDeathmatchSpawnPoint(void)
+static edict_t *SelectDeathmatchSpawnPoint(void)
 {
     if ((int)(dmflags->value) & DF_SPAWN_FARTHEST)
         return SelectFarthestDeathmatchSpawnPoint();
@@ -769,7 +766,7 @@ edict_t *SelectDeathmatchSpawnPoint(void)
         return SelectRandomDeathmatchSpawnPoint();
 }
 
-edict_t *SelectCoopSpawnPoint(edict_t *ent)
+static edict_t *SelectCoopSpawnPoint(edict_t *ent)
 {
     int     index;
     edict_t *spot = NULL;
@@ -810,7 +807,7 @@ SelectSpawnPoint
 Chooses a player start, deathmatch start, coop start, etc
 ============
 */
-void    SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles)
+static void SelectSpawnPoint(edict_t *ent, vec3_t origin, vec3_t angles)
 {
     edict_t *spot = NULL;
 
@@ -874,7 +871,7 @@ void body_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int damage, 
     }
 }
 
-void CopyToBodyQue(edict_t *ent)
+static void CopyToBodyQue(edict_t *ent)
 {
     edict_t     *body;
 
@@ -924,6 +921,8 @@ void CopyToBodyQue(edict_t *ent)
     gi.linkentity(body);
 }
 
+static void PutClientInServer(edict_t *ent);
+
 void respawn(edict_t *self)
 {
     if (deathmatch->value || coop->value) {
@@ -953,7 +952,7 @@ void respawn(edict_t *self)
  * only called when pers.spectator changes
  * note that resp.spectator should be the opposite of pers.spectator here
  */
-void spectator_respawn(edict_t *ent)
+static void spectator_respawn(edict_t *ent)
 {
     int i, numspec;
 
@@ -1039,7 +1038,7 @@ Called when a player connects to a server or respawns in
 a deathmatch.
 ============
 */
-void PutClientInServer(edict_t *ent)
+static void PutClientInServer(edict_t *ent)
 {
     char    userinfo[MAX_INFO_STRING];
     vec3_t  mins = { -16, -16, -24};
@@ -1216,7 +1215,7 @@ A client has just connected to the server in
 deathmatch mode, so clear everything out before starting them.
 =====================
 */
-void ClientBeginDeathmatch(edict_t *ent)
+static void ClientBeginDeathmatch(edict_t *ent)
 {
     G_InitEdict(ent);
 
@@ -1487,17 +1486,17 @@ void ClientDisconnect(edict_t *ent)
 
 //==============================================================
 
-edict_t *pm_passent;
-int pm_clipmask;
+static edict_t  *pm_passent;
+static int      pm_clipmask;
 
 // pmove doesn't need to know about passent and contentmask
 #if USE_NEW_GAME_API
-trace_t q_gameabi PM_trace(const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end, int contentmask)
+static trace_t q_gameabi PM_trace(const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end, int contentmask)
 {
     return gi.trace(start, mins, maxs, end, pm_passent, (game.csr.extended && contentmask) ? contentmask : pm_clipmask);
 }
 #else
-trace_t q_gameabi PM_trace(const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end)
+static trace_t q_gameabi PM_trace(const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end)
 {
     return gi.trace(start, mins, maxs, end, pm_passent, pm_clipmask);
 }

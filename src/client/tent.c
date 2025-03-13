@@ -803,19 +803,19 @@ void CL_DrawBeam(const vec3_t start, const vec3_t end, qhandle_t model)
         VectorScale(dist, len, dist);
     }
 
+    if (model == cl_mod_lightning) {
+        ent.flags = RF_FULLBRIGHT;
+        ent.angles[0] = -angles[0];
+        ent.angles[1] = angles[1] + 180.0f;
+    } else {
+        ent.flags = RF_NOSHADOW;
+        ent.angles[0] = angles[0];
+        ent.angles[1] = angles[1];
+    }
+
     VectorCopy(start, ent.origin);
     for (i = 0; i < steps; i++) {
-        if (model == cl_mod_lightning) {
-            ent.flags = RF_FULLBRIGHT;
-            ent.angles[0] = -angles[0];
-            ent.angles[1] = angles[1] + 180.0f;
-            ent.angles[2] = Com_SlowRand() % 360;
-        } else {
-            ent.angles[0] = angles[0];
-            ent.angles[1] = angles[1];
-            ent.angles[2] = Com_SlowRand() % 360;
-        }
-
+        ent.angles[2] = Com_SlowRand() % 360;
         V_AddEntity(&ent);
         VectorAdd(ent.origin, dist, ent.origin);
     }
@@ -859,7 +859,7 @@ static void CL_AddPlayerBeams(void)
     int         i, j, steps;
     beam_t      *b;
     vec3_t      dist, org;
-    float       d;
+    float       x, y, z, d;
     entity_t    ent;
     vec3_t      angles;
     float       len;
@@ -868,7 +868,11 @@ static void CL_AddPlayerBeams(void)
     float       hand_multiplier;
     player_state_t  *ps, *ops;
 
-    if (info_hand->integer == 2)
+    if (cl_gun->integer == 3)
+        hand_multiplier = -1;
+    else if (cl_gun->integer == 2)
+        hand_multiplier = 1;
+    else if (info_hand->integer == 2)
         hand_multiplier = 0;
     else if (info_hand->integer == 1)
         hand_multiplier = -1;
@@ -890,31 +894,38 @@ static void CL_AddPlayerBeams(void)
                 b->start[j] = cl.refdef.vieworg[j] + ops->gunoffset[j] +
                     CL_KEYLERPFRAC * (ps->gunoffset[j] - ops->gunoffset[j]);
 
-            VectorMA(b->start, (hand_multiplier * b->offset[0]), cl.v_right, org);
-            VectorMA(org, b->offset[1], cl.v_forward, org);
-            VectorMA(org, b->offset[2], cl.v_up, org);
-            if (info_hand->integer == 2)
+            x = b->offset[0];
+            y = b->offset[1];
+            z = b->offset[2];
+
+            // adjust offset for gun fov
+            if (cl_gunfov->value > 0) {
+                float fov_x = Cvar_ClampValue(cl_gunfov, 30, 160);
+                float fov_y = V_CalcFov(fov_x, 4, 3);
+
+                x *= tanf(cl.fov_x * (M_PIf / 360)) / tanf(fov_x * (M_PIf / 360));
+                z *= tanf(cl.fov_y * (M_PIf / 360)) / tanf(fov_y * (M_PIf / 360));
+            }
+
+            VectorMA(b->start, hand_multiplier * x, cl.v_right, org);
+            VectorMA(org, y, cl.v_forward, org);
+            VectorMA(org, z, cl.v_up, org);
+            if (hand_multiplier == 0)
                 VectorMA(org, -1, cl.v_up, org);
 
             // calculate pitch and yaw
             VectorSubtract(b->end, org, dist);
 
             if (b->model != cl_mod_grapple_cable) {
-                // FIXME: don't add offset twice?
                 d = VectorLength(dist);
                 VectorScale(cl.v_forward, d, dist);
-                VectorMA(dist, (hand_multiplier * b->offset[0]), cl.v_right, dist);
-                VectorMA(dist, b->offset[1], cl.v_forward, dist);
-                VectorMA(dist, b->offset[2], cl.v_up, dist);
-                if (info_hand->integer == 2)
-                    VectorMA(dist, -1, cl.v_up, dist);
             }
 
             // FIXME: use cl.refdef.viewangles?
             vectoangles2(dist, angles);
 
             // if it's the heatbeam, draw the particle effect
-            if (cl_mod_heatbeam && b->model == cl_mod_heatbeam && !sv_paused->integer)
+            if (b->model == cl_mod_heatbeam && !sv_paused->integer)
                 CL_Heatbeam(org, dist);
 
             framenum = 1;
@@ -937,7 +948,7 @@ static void CL_AddPlayerBeams(void)
                 VectorMA(org, -b->offset[0] + 1, r, org);
                 VectorMA(org, -b->offset[1], f, org);
                 VectorMA(org, -b->offset[2] - 10, u, org);
-            } else if (cl_mod_heatbeam && b->model == cl_mod_heatbeam) {
+            } else if (b->model == cl_mod_heatbeam) {
                 // if it's a monster, do the particle effect
                 CL_MonsterPlasma_Shell(b->start);
             }
@@ -985,25 +996,26 @@ static void CL_AddPlayerBeams(void)
             VectorScale(dist, len, dist);
         }
 
+        if (b->model == cl_mod_heatbeam) {
+            ent.frame = framenum;
+            ent.flags = RF_FULLBRIGHT;
+            ent.angles[0] = -angles[0];
+            ent.angles[1] = angles[1] + 180.0f;
+            ent.angles[2] = cl.time % 360;
+        } else if (b->model == cl_mod_lightning) {
+            ent.flags = RF_FULLBRIGHT;
+            ent.angles[0] = -angles[0];
+            ent.angles[1] = angles[1] + 180.0f;
+        } else {
+            ent.flags = RF_NOSHADOW;
+            ent.angles[0] = angles[0];
+            ent.angles[1] = angles[1];
+        }
+
         VectorCopy(org, ent.origin);
         for (j = 0; j < steps; j++) {
-            if (b->model == cl_mod_heatbeam) {
-                ent.frame = framenum;
-                ent.flags = RF_FULLBRIGHT;
-                ent.angles[0] = -angles[0];
-                ent.angles[1] = angles[1] + 180.0f;
-                ent.angles[2] = cl.time % 360;
-            } else if (b->model == cl_mod_lightning) {
-                ent.flags = RF_FULLBRIGHT;
-                ent.angles[0] = -angles[0];
-                ent.angles[1] = angles[1] + 180.0f;
+            if (b->model != cl_mod_heatbeam)
                 ent.angles[2] = Com_SlowRand() % 360;
-            } else {
-                ent.angles[0] = angles[0];
-                ent.angles[1] = angles[1];
-                ent.angles[2] = Com_SlowRand() % 360;
-            }
-
             V_AddEntity(&ent);
             VectorAdd(ent.origin, dist, ent.origin);
         }

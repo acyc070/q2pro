@@ -83,6 +83,7 @@ typedef struct {
     bool        fixed_origin;   // use origin instead of fetching entnum's origin
     bool        autosound;      // from an entity->sound, cleared each frame
 #if USE_OPENAL
+    byte        fullvolume;
     unsigned    autoframe;
     unsigned    srcnum;
 #endif
@@ -180,9 +181,10 @@ sfx_t *S_SfxForHandle(qhandle_t hSfx);
 sfxcache_t *S_LoadSound(sfx_t *s);
 channel_t *S_PickChannel(int entnum, int entchannel);
 void S_IssuePlaysound(playsound_t *ps);
-void S_BuildSoundList(int *sounds);
+int S_BuildSoundList(int *sounds);
 float S_GetEntityLoopVolume(const centity_state_t *ent);
 float S_GetEntityLoopDistMult(const centity_state_t *ent);
+void S_SpatializeOrigin(const vec3_t origin, float master_vol, float dist_mult, float *left_vol, float *right_vol, bool stereo);
 
 #if USE_AVCODEC
 bool OGG_Load(sizebuf_t *sz);

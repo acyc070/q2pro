@@ -36,23 +36,22 @@ static int  sound_reelin;
 static int  sound_sight;
 static int  sound_tap;
 static int  sound_scratch;
-static int  sound_search;
 
 void parasite_stand(edict_t *self);
 void parasite_start_run(edict_t *self);
-void parasite_run(edict_t *self);
-void parasite_walk(edict_t *self);
 void parasite_start_walk(edict_t *self);
-void parasite_end_fidget(edict_t *self);
-void parasite_do_fidget(edict_t *self);
-void parasite_refidget(edict_t *self);
 
-void parasite_launch(edict_t *self)
+static void parasite_run(edict_t *self);
+static void parasite_walk(edict_t *self);
+static void parasite_do_fidget(edict_t *self);
+static void parasite_refidget(edict_t *self);
+
+static void parasite_launch(edict_t *self)
 {
     gi.sound(self, CHAN_WEAPON, sound_launch, 1, ATTN_NORM, 0);
 }
 
-void parasite_reel_in(edict_t *self)
+static void parasite_reel_in(edict_t *self)
 {
     gi.sound(self, CHAN_WEAPON, sound_reelin, 1, ATTN_NORM, 0);
 }
@@ -62,19 +61,14 @@ void parasite_sight(edict_t *self, edict_t *other)
     gi.sound(self, CHAN_WEAPON, sound_sight, 1, ATTN_NORM, 0);
 }
 
-void parasite_tap(edict_t *self)
+static void parasite_tap(edict_t *self)
 {
     gi.sound(self, CHAN_WEAPON, sound_tap, 1, ATTN_IDLE, 0);
 }
 
-void parasite_scratch(edict_t *self)
+static void parasite_scratch(edict_t *self)
 {
     gi.sound(self, CHAN_WEAPON, sound_scratch, 1, ATTN_IDLE, 0);
-}
-
-void parasite_search(edict_t *self)
-{
-    gi.sound(self, CHAN_WEAPON, sound_search, 1, ATTN_IDLE, 0);
 }
 
 static const mframe_t parasite_frames_start_fidget[] = {
@@ -107,17 +101,12 @@ static const mframe_t parasite_frames_end_fidget[] = {
 };
 const mmove_t parasite_move_end_fidget = {FRAME_stand28, FRAME_stand35, parasite_frames_end_fidget, parasite_stand};
 
-void parasite_end_fidget(edict_t *self)
-{
-    self->monsterinfo.currentmove = &parasite_move_end_fidget;
-}
-
-void parasite_do_fidget(edict_t *self)
+static void parasite_do_fidget(edict_t *self)
 {
     self->monsterinfo.currentmove = &parasite_move_fidget;
 }
 
-void parasite_refidget(edict_t *self)
+static void parasite_refidget(edict_t *self)
 {
     if (random() <= 0.8f)
         self->monsterinfo.currentmove = &parasite_move_fidget;
@@ -191,7 +180,7 @@ void parasite_start_run(edict_t *self)
         self->monsterinfo.currentmove = &parasite_move_start_run;
 }
 
-void parasite_run(edict_t *self)
+static void parasite_run(edict_t *self)
 {
     if (self->monsterinfo.aiflags & AI_STAND_GROUND)
         self->monsterinfo.currentmove = &parasite_move_stand;
@@ -231,7 +220,7 @@ void parasite_start_walk(edict_t *self)
     self->monsterinfo.currentmove = &parasite_move_start_walk;
 }
 
-void parasite_walk(edict_t *self)
+static void parasite_walk(edict_t *self)
 {
     self->monsterinfo.currentmove = &parasite_move_walk;
 }
@@ -291,7 +280,7 @@ static bool parasite_drain_attack_ok(vec3_t start, vec3_t end)
     return true;
 }
 
-void parasite_drain_attack(edict_t *self)
+static void parasite_drain_attack(edict_t *self)
 {
     vec3_t  offset, start, f, r, end, dir;
     trace_t tr;
@@ -369,7 +358,7 @@ Death Stuff Starts
 ===
 */
 
-void parasite_dead(edict_t *self)
+static void parasite_dead(edict_t *self)
 {
     VectorSet(self->mins, -16, -16, -24);
     VectorSet(self->maxs, 16, 16, -8);
@@ -434,7 +423,6 @@ static void parasite_precache(void)
     sound_sight = gi.soundindex("parasite/parsght1.wav");
     sound_tap = gi.soundindex("parasite/paridle1.wav");
     sound_scratch = gi.soundindex("parasite/paridle2.wav");
-    sound_search = gi.soundindex("parasite/parsrch1.wav");
 }
 
 /*QUAKED monster_parasite (1 .5 0) (-16 -16 -24) (16 16 32) Ambush Trigger_Spawn Sight

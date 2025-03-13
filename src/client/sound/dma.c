@@ -442,14 +442,12 @@ static void PaintChannels(int endtime)
                 if (!sc)
                     break;
 
-                Q_assert(sc->width == 1 || sc->width == 2);
-                Q_assert(sc->channels == 1 || sc->channels == 2);
-
                 // max painting is to the end of the buffer
                 int count = min(end, ch->end) - ltime;
 
                 if (count > 0) {
                     int func = (sc->width - 1) * 3 + (sc->channels - 1) * (S_IsFullVolume(ch) + 1);
+                    Q_assert(func < q_countof(paintfuncs));
                     paintfuncs[func](ch, sc, count, &paintbuffer[ltime - s_paintedtime]);
                     ch->pos += count;
                     ltime += count;
@@ -639,50 +637,6 @@ static void DMA_ClearBuffer(void)
 
 /*
 =================
-SpatializeOrigin
-
-Used for spatializing channels and autosounds
-=================
-*/
-static void SpatializeOrigin(const vec3_t origin, float master_vol, float dist_mult, float *left_vol, float *right_vol)
-{
-    vec_t       dot;
-    vec_t       dist;
-    vec_t       lscale, rscale, scale;
-    vec3_t      source_vec;
-
-// calculate stereo seperation and distance attenuation
-    VectorSubtract(origin, listener_origin, source_vec);
-
-    dist = VectorNormalize(source_vec);
-    dist -= SOUND_FULLVOLUME;
-    if (dist < 0)
-        dist = 0;           // close enough to be at full volume
-    dist *= dist_mult;      // different attenuation levels
-
-    if (dma.channels == 1 || !dist_mult) {
-        rscale = 1.0f;
-        lscale = 1.0f;
-    } else {
-        dot = DotProduct(listener_right, source_vec);
-        rscale = 0.5f * (1.0f + dot);
-        lscale = 0.5f * (1.0f - dot);
-    }
-
-    // add in distance effect
-    scale = (1.0f - dist) * rscale;
-    *right_vol = master_vol * scale;
-    if (*right_vol < 0)
-        *right_vol = 0;
-
-    scale = (1.0f - dist) * lscale;
-    *left_vol = master_vol * scale;
-    if (*left_vol < 0)
-        *left_vol = 0;
-}
-
-/*
-=================
 DMA_Spatialize
 =================
 */
@@ -691,7 +645,6 @@ static void DMA_Spatialize(channel_t *ch)
     vec3_t      origin;
 
     // anything coming from the view entity will always be full volume
-    // no attenuation = no spatialization
     if (S_IsFullVolume(ch)) {
         ch->leftvol = ch->master_vol;
         ch->rightvol = ch->master_vol;
@@ -704,7 +657,7 @@ static void DMA_Spatialize(channel_t *ch)
         CL_GetEntitySoundOrigin(ch->entnum, origin);
     }
 
-    SpatializeOrigin(origin, ch->master_vol, ch->dist_mult, &ch->leftvol, &ch->rightvol);
+    S_SpatializeOrigin(origin, ch->master_vol, ch->dist_mult, &ch->leftvol, &ch->rightvol, dma.channels - 1);
 }
 
 /*
@@ -728,10 +681,8 @@ static void AddLoopSounds(void)
     centity_state_t *ent;
     vec3_t      origin;
 
-    if (cls.state != ca_active || !s_active || sv_paused->integer || !s_ambient->integer)
+    if (!S_BuildSoundList(sounds))
         return;
-
-    S_BuildSoundList(sounds);
 
     for (i = 0; i < cl.frame.numEntities; i++) {
         if (!sounds[i])
@@ -752,7 +703,7 @@ static void AddLoopSounds(void)
 
         // find the total contribution of all sounds of this type
         CL_GetEntitySoundOrigin(ent->number, origin);
-        SpatializeOrigin(origin, vol, att, &left_total, &right_total);
+        S_SpatializeOrigin(origin, vol, att, &left_total, &right_total, dma.channels - 1);
         for (j = i + 1; j < cl.frame.numEntities; j++) {
             if (sounds[j] != sounds[i])
                 continue;
@@ -762,8 +713,10 @@ static void AddLoopSounds(void)
             ent = &cl.entityStates[num];
 
             CL_GetEntitySoundOrigin(ent->number, origin);
-            SpatializeOrigin(origin, S_GetEntityLoopVolume(ent),
-                             S_GetEntityLoopDistMult(ent), &left, &right);
+            S_SpatializeOrigin(origin,
+                               S_GetEntityLoopVolume(ent),
+                               S_GetEntityLoopDistMult(ent),
+                               &left, &right, dma.channels - 1);
             left_total += left;
             right_total += right;
         }

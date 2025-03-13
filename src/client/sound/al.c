@@ -26,17 +26,21 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 // OpenAL implementation should support at least this number of sources
 #define MIN_CHANNELS    16
 
+static cvar_t       *al_merge_looping;
+
 static ALuint       s_srcnums[MAX_CHANNELS];
 static ALuint       s_stream;
 static ALuint       s_stream_buffers;
 static ALboolean    s_loop_points;
 static ALboolean    s_source_spatialize;
-static unsigned     s_framecount;
+static ALuint       s_framecount;
+static ALint        s_merge_looping_minval;
 
 static ALuint       s_underwater_filter;
 static bool         s_underwater_flag;
 
 static void AL_StreamStop(void);
+static void AL_StopChannel(channel_t *ch);
 
 static void AL_SoundInfo(void)
 {
@@ -58,15 +62,32 @@ static void s_underwater_gain_hf_changed(cvar_t *self)
     qalFilterf(s_underwater_filter, AL_LOWPASS_GAINHF, Cvar_ClampValue(self, 0.001f, 1));
 }
 
+static void al_merge_looping_changed(cvar_t *self)
+{
+    int         i;
+    channel_t   *ch;
+
+    for (i = 0, ch = s_channels; i < s_numchannels; i++, ch++) {
+        if (ch->autosound)
+            AL_StopChannel(ch);
+    }
+}
+
+static void s_volume_changed(cvar_t *self)
+{
+    qalListenerf(AL_GAIN, self->value);
+}
+
 static bool AL_Init(void)
 {
     int i;
 
     Com_DPrintf("Initializing OpenAL\n");
 
-    if (!QAL_Init()) {
+    i = QAL_Init();
+    if (i < 0)
         goto fail0;
-    }
+    s_merge_looping_minval = i + 1;
 
     Com_DPrintf("AL_VENDOR: %s\n", qalGetString(AL_VENDOR));
     Com_DPrintf("AL_RENDERER: %s\n", qalGetString(AL_RENDERER));
@@ -98,8 +119,17 @@ static bool AL_Init(void)
 
     s_numchannels = i;
 
+    s_volume->changed = s_volume_changed;
+    s_volume_changed(s_volume);
+
+    al_merge_looping = Cvar_Get("al_merge_looping", "1", 0);
+    al_merge_looping->changed = al_merge_looping_changed;
+
     s_loop_points = qalIsExtensionPresent("AL_SOFT_loop_points");
     s_source_spatialize = qalIsExtensionPresent("AL_SOFT_source_spatialize");
+
+    // init distance model
+    qalDistanceModel(AL_LINEAR_DISTANCE_CLAMPED);
 
     // init stream source
     qalSourcef(s_stream, AL_ROLLOFF_FACTOR, 0.0f);
@@ -154,6 +184,8 @@ static void AL_Shutdown(void)
 
     s_underwater_flag = false;
     s_underwater_gain_hf->changed = NULL;
+    s_volume->changed = NULL;
+    al_merge_looping->changed = NULL;
 
     QAL_Shutdown();
 }
@@ -216,23 +248,33 @@ static int AL_GetBeginofs(float timeofs)
 
 static void AL_Spatialize(channel_t *ch)
 {
-    vec3_t      origin;
+    // merged autosounds are handled differently
+    if (ch->autosound && al_merge_looping->integer >= s_merge_looping_minval)
+        return;
 
     // anything coming from the view entity will always be full volume
-    // no attenuation = no spatialization
-    if (S_IsFullVolume(ch)) {
-        VectorCopy(listener_origin, origin);
-    } else if (ch->fixed_origin) {
-        VectorCopy(ch->origin, origin);
-    } else {
+    bool fullvolume = S_IsFullVolume(ch);
+
+    // update fullvolume flag if needed
+    if (ch->fullvolume != fullvolume) {
+        if (s_source_spatialize) {
+            qalSourcei(ch->srcnum, AL_SOURCE_SPATIALIZE_SOFT, !fullvolume);
+        }
+        qalSourcei(ch->srcnum, AL_SOURCE_RELATIVE, fullvolume);
+        if (fullvolume) {
+            qalSource3f(ch->srcnum, AL_POSITION, 0, 0, 0);
+        } else if (ch->fixed_origin) {
+            qalSource3f(ch->srcnum, AL_POSITION, AL_UnpackVector(ch->origin));
+        }
+        ch->fullvolume = fullvolume;
+    }
+
+    // update position if needed
+    if (!ch->fixed_origin && !ch->fullvolume) {
+        vec3_t origin;
         CL_GetEntitySoundOrigin(ch->entnum, origin);
+        qalSource3f(ch->srcnum, AL_POSITION, AL_UnpackVector(origin));
     }
-
-    if (s_source_spatialize) {
-        qalSourcei(ch->srcnum, AL_SOURCE_SPATIALIZE_SOFT, !S_IsFullVolume(ch));
-    }
-
-    qalSource3f(ch->srcnum, AL_POSITION, AL_UnpackVector(origin));
 }
 
 static void AL_StopChannel(channel_t *ch)
@@ -269,6 +311,8 @@ static void AL_PlayChannel(channel_t *ch)
     qalSourcef(ch->srcnum, AL_MAX_DISTANCE, 8192);
     qalSourcef(ch->srcnum, AL_ROLLOFF_FACTOR, ch->dist_mult * (8192 - SOUND_FULLVOLUME));
 
+    // force update
+    ch->fullvolume = -1;
     AL_Spatialize(ch);
 
     // play it
@@ -321,6 +365,112 @@ static channel_t *AL_FindLoopingSound(int entnum, const sfx_t *sfx)
     return NULL;
 }
 
+static void AL_MergeLoopSounds(void)
+{
+    int         i, j;
+    int         sounds[MAX_EDICTS];
+    float       left, right, left_total, right_total, vol, att;
+    float       pan, pan2, gain;
+    channel_t   *ch;
+    sfx_t       *sfx;
+    sfxcache_t  *sc;
+    int         num;
+    centity_state_t *ent;
+    vec3_t      origin;
+
+    if (!S_BuildSoundList(sounds))
+        return;
+
+    for (i = 0; i < cl.frame.numEntities; i++) {
+        if (!sounds[i])
+            continue;
+
+        sfx = S_SfxForHandle(cl.sound_precache[sounds[i]]);
+        if (!sfx)
+            continue;       // bad sound effect
+        sc = sfx->cache;
+        if (!sc)
+            continue;
+
+        num = (cl.frame.firstEntity + i) & PARSE_ENTITIES_MASK;
+        ent = &cl.entityStates[num];
+
+        vol = S_GetEntityLoopVolume(ent);
+        att = S_GetEntityLoopDistMult(ent);
+
+        // find the total contribution of all sounds of this type
+        CL_GetEntitySoundOrigin(ent->number, origin);
+        S_SpatializeOrigin(origin, vol, att, &left_total, &right_total, true);
+        for (j = i + 1; j < cl.frame.numEntities; j++) {
+            if (sounds[j] != sounds[i])
+                continue;
+            sounds[j] = 0;  // don't check this again later
+
+            num = (cl.frame.firstEntity + j) & PARSE_ENTITIES_MASK;
+            ent = &cl.entityStates[num];
+
+            CL_GetEntitySoundOrigin(ent->number, origin);
+            S_SpatializeOrigin(origin,
+                               S_GetEntityLoopVolume(ent),
+                               S_GetEntityLoopDistMult(ent),
+                               &left, &right, true);
+            left_total += left;
+            right_total += right;
+        }
+
+        if (left_total == 0 && right_total == 0)
+            continue;       // not audible
+
+        left_total = min(1.0f, left_total);
+        right_total = min(1.0f, right_total);
+
+        gain = left_total + right_total;
+
+        pan  = (right_total - left_total) / (left_total + right_total);
+        pan2 = -sqrtf(1.0f - pan * pan);
+
+        ch = AL_FindLoopingSound(0, sfx);
+        if (ch) {
+            qalSourcef(ch->srcnum, AL_GAIN, gain);
+            qalSource3f(ch->srcnum, AL_POSITION, pan, 0.0f, pan2);
+            ch->autoframe = s_framecount;
+            ch->end = s_paintedtime + sc->length;
+            continue;
+        }
+
+        // allocate a channel
+        ch = S_PickChannel(0, 0);
+        if (!ch)
+            continue;
+
+        ch->srcnum = s_srcnums[ch - s_channels];
+        qalGetError();
+        qalSourcei(ch->srcnum, AL_BUFFER, sc->bufnum);
+        qalSourcei(ch->srcnum, AL_LOOPING, AL_TRUE);
+        qalSourcei(ch->srcnum, AL_SOURCE_RELATIVE, AL_TRUE);
+        if (s_source_spatialize) {
+            qalSourcei(ch->srcnum, AL_SOURCE_SPATIALIZE_SOFT, AL_TRUE);
+        }
+        qalSourcef(ch->srcnum, AL_ROLLOFF_FACTOR, 0.0f);
+        qalSourcef(ch->srcnum, AL_GAIN, gain);
+        qalSource3f(ch->srcnum, AL_POSITION, pan, 0.0f, pan2);
+
+        ch->autosound = true;   // remove next frame
+        ch->autoframe = s_framecount;
+        ch->sfx = sfx;
+        ch->entnum = ent->number;
+        ch->master_vol = vol;
+        ch->dist_mult = att;
+        ch->end = s_paintedtime + sc->length;
+
+        // play it
+        qalSourcePlay(ch->srcnum);
+        if (qalGetError() != AL_NO_ERROR) {
+            AL_StopChannel(ch);
+        }
+    }
+}
+
 static void AL_AddLoopSounds(void)
 {
     int         i;
@@ -331,10 +481,8 @@ static void AL_AddLoopSounds(void)
     int         num;
     centity_state_t *ent;
 
-    if (cls.state != ca_active || sv_paused->integer || !s_ambient->integer)
+    if (!S_BuildSoundList(sounds))
         return;
-
-    S_BuildSoundList(sounds);
 
     for (i = 0; i < cl.frame.numEntities; i++) {
         if (!sounds[i])
@@ -476,8 +624,6 @@ static void AL_Update(void)
     AL_CopyVector(listener_forward, orientation);
     AL_CopyVector(listener_up, orientation + 3);
     qalListenerfv(AL_ORIENTATION, orientation);
-    qalListenerf(AL_GAIN, s_volume->value);
-    qalDistanceModel(AL_LINEAR_DISTANCE_CLAMPED);
 
     AL_UpdateUnderWater();
 
@@ -509,13 +655,17 @@ static void AL_Update(void)
         }
 #endif
 
-        AL_Spatialize(ch);         // respatialize channel
+        AL_Spatialize(ch);  // respatialize channel
     }
 
     s_framecount++;
 
     // add loopsounds
-    AL_AddLoopSounds();
+    if (al_merge_looping->integer >= s_merge_looping_minval) {
+        AL_MergeLoopSounds();
+    } else {
+        AL_AddLoopSounds();
+    }
 
     AL_IssuePlaysounds();
 

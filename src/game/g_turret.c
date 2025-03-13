@@ -19,7 +19,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 #include "g_local.h"
 
-void AnglesNormalize(vec3_t vec)
+static void AnglesNormalize(vec3_t vec)
 {
     while (vec[0] > 360)
         vec[0] -= 360;
@@ -70,7 +70,7 @@ Use "angle" to set the starting angle.
 "maxyaw"    max acceptable yaw angle   : default 360
 */
 
-void turret_breach_fire(edict_t *self)
+static void turret_breach_fire(edict_t *self)
 {
     vec3_t  f, r, u;
     vec3_t  start;
@@ -283,8 +283,6 @@ void turret_driver_die(edict_t *self, edict_t *inflictor, edict_t *attacker, int
 
     infantry_die(self, inflictor, attacker, damage, point);
 }
-
-bool FindTarget(edict_t *self);
 
 void turret_driver_think(edict_t *self)
 {
